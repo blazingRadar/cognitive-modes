@@ -1,10 +1,10 @@
-# The Model Already Knows
+# Know Your Model's Mode
 
 **Taxonomy and Empirical Evidence of Cognitive Mode Activation in Frontier LLMs**
 
 This repository contains the research paper and data mapping 10 distinct "Cognitive Modes" in LLMs and proving why standard role-playing prompts (e.g., "You are a senior engineer") degrade performance in complex reasoning tasks.
 
-## 📄 [Read the Paper: Cognitive Mode Activation](cognitive_modes.md)
+## 📄 [Read the Paper: Know Your Model's Mode](cognitive_modes.md)
 
 ### Key Findings
 1. **The Persona Problem**: Role assignment inflates model confidence (locking it at 85-95%) while simultaneously adding noise and hiding real bugs.
