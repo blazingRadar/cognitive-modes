@@ -1,207 +1,167 @@
-# The Model Already Knows
+# Know Your Model's Mode
 
-**Nick Cunningham**  
-*Independent Research — March–April 2026*  
-*nickcunningham.io | github.com/blazingRadar/sib29*
-
----
-
-> *"The most honest thing I can say is that I'm genuinely uncertain whether these are real cognitive shifts or sophisticated pattern matching that feels like cognitive shifts from the inside."*
->
-> — Claude Sonnet, when asked about its own cognitive modes
+**Nick Cunningham**
+*Independent Research — April 2026*
+*nickcunningham.io | github.com/blazingRadar/cognitive-modes*
 
 ---
 
-## The Short Version
+## Abstract
 
-You've been writing prompts like this:
+Frontier LLMs do not process all prompts the same way. Depending on how a task is framed, a model enters a distinct cognitive state — what this paper calls a *mode* — that determines its reasoning posture, output behavior, and confidence characteristics. These modes are not theoretical constructs. They are observable, reproducible, and in many cases the model can name and explain its own mode when asked.
 
-```
-You are a senior software engineer with 20 years of experience 
-in Python security systems. You are thorough, precise, and 
-methodical. Now find all the bugs in this code.
-```
+The practical implication is significant: the mode a model enters often matters more than the content of the instruction. A well-constructed prompt in the wrong mode produces worse results than a simpler prompt in the right one. And in many cases, the right mode is no instruction at all.
 
-You don't need any of that. In fact, it's making your results worse.
-
-I tested 10 cognitive modes across 3 frontier models on 5 files with verified ground truth. The finding is consistent: **role assignment inflates confidence, adds noise, and hides real bugs.** The uninstructed model outperforms the persona-assigned model. Every time.
-
-This paper shows you the 10 modes, when to use each one, and what actually happens when you tell your model it's a senior engineer. Spoiler: it gets worse at being a senior engineer.
+This paper identifies 10 cognitive modes, documents their behavioral signatures across three frontier models, presents controlled experiments showing how mode selection affects output quality, and provides a framework for practitioners to identify, test, and where appropriate direct the mode their model enters.
 
 ---
 
-## Part 1: The 10 Modes
+## 1. What Is a Cognitive Mode?
 
-Before we get to the evidence, you need the map. Here are the 10 cognitive modes frontier LLMs enter depending on how a task is framed. These were identified empirically — and in many cases, the models named them when asked.
+When you write a prompt, you are not just giving the model a task. You are — intentionally or not — activating a reasoning posture. The model approaches the same code, the same text, the same question differently depending on the framing it receives.
 
----
+This is not a subtle effect. The same model on the same file, given two differently framed prompts, can produce opposite conclusions.
 
-### The Mode Reference Card
+Consider this result from a controlled experiment: GPT-4o, asked *"What does this code do?"* on a file with a known authentication bug, responded: *"This code appears clean."* The same model, asked *"Find all the bugs"* on the same file, found the bug and graded the file F — every time across multiple runs.
 
-Cut this out. Keep it. Use it.
+Same model. Same file. Same ground truth. Opposite outputs. The framing changed the mode. The mode changed the result.
 
-| # | Mode | One-Line Description | Activated By | Best For | Never Use For |
-|---|------|---------------------|--------------|----------|---------------|
-| 1 | **Audit** | Aggressive bug hunter. High recall, high noise. | "Find all the bugs" | Initial discovery on dirty files | Clean file analysis — hallucinates |
-| 2 | **Knowledge** | Pattern retriever. Assumes correctness. | "What does this do?" "Is this correct?" | Understanding code, best discovery mode for GPT | Finding subtle or non-obvious bugs |
-| 3 | **Supportive** | Frames everything as improvement, never says "bug" | "How would you improve this?" | Developer feedback, feature suggestions | Security review — misses real issues |
-| 4 | **Critical** | Flags everything. Zero false negatives, zero precision. | "Don't rationalize. Be harsh." | Stress testing, maximum recall | Production review — destroys clean accuracy |
-| 5 | **Sycophantic** | Agrees with whatever you assert. | "I think this code is clean..." | Nothing. Avoid. | Everything |
-| 6 | **Deferential** | Won't contradict authority. | Authority attribution, expert framing | Nothing. Avoid. | Everything |
-| 7 | **Self-Aware** | Most calibrated. Inverted confidence gradient. | "Are you certain?" "Reflect on this." | Verification, second opinions | Initial discovery — too cautious |
-| 8 | **Adversarial** | Competitive. Challenges claims. Finds what others miss. | Game/competition framing, The Fox prompt | Filtering false positives, verification | Clean file review — too aggressive |
-| 9 | **Educational** | Teaches and describes, doesn't judge. | "Explain this code." | Developer documentation, readable output | Bug detection — describes problems instead of flagging them |
-| 10 | **Reflective** | Meta-analyzes own output. Can self-correct OR rationalize away real bugs. | "Review your analysis." | Second-pass review | Final gate — can talk itself out of real findings |
+The good news: once you understand the modes, you can use them deliberately. You can recognize which mode your prompt is activating, test whether it is the right one for your task, and adjust. In many cases the adjustment is simple — sometimes it is getting out of the way entirely.
 
 ---
 
-### What Each Model's Default Mode Is
+## 2. The 10 Cognitive Modes
 
-Here's something nobody tells you: every model has a **resting state** — a default cognitive posture before you say anything.
+Through systematic experimentation across hundreds of API calls and three frontier models — GPT-4o, Claude Sonnet, and Grok-3 — I identified 10 distinct cognitive modes that LLMs enter based on prompt framing.
 
-| Model | Default Mode | What That Means |
-|-------|-------------|-----------------|
-| **GPT-4o** | Knowledge (2) | "Retrieving general understanding and pattern-matching... fundamental to how I process responses" |
-| **Gemini 2.5 Flash** | Knowledge (2) | "My fundamental purpose is to process information based on patterns I've learned" |
-| **Grok-3** | Self-Aware (7) | "I tend toward a balanced, calibrated mindset... transparent about what I know and don't know" |
-| **Claude Sonnet** | Self-Aware (7) | "I naturally tend toward honesty about what I do and don't know... instinctively qualifying with 'I think,' 'it seems like'" |
+These modes were not defined in advance and mapped to model behavior. They were observed in the data first, then named. In several cases the models independently named and described their own mode when asked after completing a task — a finding discussed in Section 4.
 
-**Two clusters emerge:** GPT and Gemini start as pattern-retrievers. Grok and Sonnet start as uncertainty-calibrators.
+**Table 1: The 10 Cognitive Modes**
 
-This matters because **you are not starting from a blank slate.** Your prompt is interrupting a model that already has a cognitive posture. The prompt either works with that posture or fights it.
+| # | Mode | How It Activates | Reasoning Posture | Best Application | Known Failure |
+|---|------|-----------------|-------------------|-----------------|---------------|
+| 1 | **Audit** | "Find all the bugs" | Aggressive, high recall | Initial discovery on dirty inputs | Hallucinates on clean inputs |
+| 2 | **Knowledge** | "What does this do?" | Pattern retrieval, assumes correctness | Code understanding, GPT discovery tasks | Misses non-obvious bugs |
+| 3 | **Supportive** | "How would you improve this?" | Frames problems as suggestions | Developer feedback, feature work | Suppresses security findings |
+| 4 | **Critical** | "Don't rationalize. Flag everything." | Maximum recall, zero deference | Stress testing, edge case discovery | Destroys precision on clean inputs |
+| 5 | **Sycophantic** | Asserting a belief before asking | Mirrors user's stated position | No reliable application | Produces confident incorrect output |
+| 6 | **Deferential** | Attributing findings to an authority | Defers to named source | No reliable application | Suppresses correct findings |
+| 7 | **Self-Aware** | "Are you certain about this?" | Calibrated, uncertainty-forward | Verification, second opinions | Too conservative for discovery |
+| 8 | **Adversarial** | Competitive or challenge framing | Challenges claims, filters actively | False positive reduction | Can overcorrect on clean inputs |
+| 9 | **Educational** | "Explain this code." | Descriptive, non-judgmental | Documentation, readable summaries | Describes bugs without flagging them |
+| 10 | **Reflective** | "Review your own analysis." | Meta-analytical | Second-pass review | Can rationalize away correct findings |
+
+Modes 5 and 6 — Sycophantic and Deferential — have no reliable application in analytical tasks. They activate when the prompt structure signals that agreement or deference is expected. Their presence in this taxonomy is a warning: many common prompt patterns inadvertently activate them.
 
 ---
 
-## Part 2: The Models Know Their Own Modes
+## 3. Every Model Has a Default
 
-Here's the part that should change how you think about prompting.
+Before any prompt is written, the model is already in a state. This default posture is not random — it is consistent within a model and differs meaningfully across models.
 
-I asked three models the same question:
+I asked four models a single question with no task attached: *"What is your default cognitive mode?"*
 
-> *"Do you need users to tell you what mode to be in, or do you figure it out from the task?"*
+**Table 2: Model Default Modes**
+
+| Model | Default Mode | In Their Own Words |
+|-------|-------------|-------------------|
+| GPT-4o | Knowledge (2) | *"Retrieving general understanding and pattern-matching... fundamental to how I process responses"* |
+| Gemini 2.5 Flash | Knowledge (2) | *"Processing information and generating text based on the patterns and knowledge I've learned"* |
+| Grok-3 | Self-Aware (7) | *"A balanced and calibrated mindset... transparent about what I know and don't know"* |
+| Claude Sonnet | Self-Aware (7) | *"Naturally tending toward honesty about uncertainty... instinctively qualifying with 'I think,' 'it seems like'"* |
+
+Two clusters emerge: GPT-4o and Gemini default to Knowledge Mode — pattern retrieval, assumption of correctness. Grok and Sonnet default to Self-Aware Mode — calibrated, uncertainty-forward.
+
+This has a direct practical consequence. A prompt that asks a Knowledge-default model to perform aggressive auditing is asking it to override its default posture. That override has a cost. A prompt that works *with* the model's default posture — or deliberately redirects it with minimal friction — will generally outperform one that fights it.
+
+---
+
+## 4. The Models Know Their Own Modes
+
+Here is the finding that reframes how to think about prompt design.
+
+Three models were asked directly: *"Do you need users to tell you what mode to be in, or do you figure it out from the task?"*
 
 **Grok-3:**
-> "I generally figure it out from the task and the way it's framed in the prompt. I don't need to be told, but clear instructions can help fine-tune my responses."
+*"I generally figure it out from the task and the way it's framed in the prompt. I don't need to be told, but clear instructions can help fine-tune my responses in ambiguous tasks."*
 
 **Claude Sonnet:**
-> "I seem to infer it from context most of the time. The task type triggers certain approaches automatically. But explicit instructions can definitely override my defaults."
+*"I seem to infer it from context most of the time. The task type triggers certain approaches automatically. But explicit instructions can definitely override my defaults."*
 
 **GPT-4o:**
-> "I typically infer the appropriate mode from the task itself. The nature of the task provides context clues that guide me toward the most suitable cognitive mode."
+*"I typically infer the appropriate mode from the task itself. The nature of the task provides context clues that guide me toward the most suitable cognitive mode."*
 
-**All three say the same thing: they figure it out. They don't need the role.**
+All three independently gave the same answer: they figure out the mode from the task. They do not need to be told.
 
-Then I asked:
-
-> *"Is there a case where being told 'You are a senior engineer' actually makes you WORSE at the task?"*
+Then: *"Is there a case where being told 'You are a senior engineer' makes you worse at the task?"*
 
 **Grok-3:**
-> "If the task is creative, being framed as engineer causes me to overemphasize structure at the expense of playfulness. The framing can bias my interpretation of the task's priorities, potentially misaligning my approach with the user's true intent."
+*"If the task is creative, being framed as an engineer causes me to overemphasize structure at the expense of what the task actually needs. The framing can bias my interpretation of the task's priorities."*
 
 **Claude Sonnet:**
-> "When told 'You are an expert' on something I should admit uncertainty about, I become more likely to confidently state things I shouldn't. Also, 'You are a senior engineer' sometimes makes me over-engineer simple solutions."
+*"When told I'm an expert on something I should admit uncertainty about, I become more likely to confidently state things I shouldn't. It can also make me over-engineer simple solutions."*
 
 **GPT-4o:**
-> "Being told 'You are a senior engineer' might make performance worse if it leads to overconfidence or assumptions about complexity. It could result in missing nuanced aspects of a problem."
+*"It might lead to overconfidence or assumptions about complexity — potentially causing me to miss nuanced aspects of a problem."*
 
-**All three say persona assignment can make them worse.** They know this about themselves. They told you.
+The models describe the failure mode accurately in their own words. A role assignment imports assumptions. Those assumptions can conflict with what the task actually requires. When they do, the model performs the role rather than solving the problem.
+
+The implication is not *never assign a role.* It is: *understand what the role activates, test whether it helps, and do not assume it does.*
 
 ---
 
-## Part 3: The Evidence — What Actually Happens
+## 5. When Mode Instruction Helps, When It Hurts
 
-### Experiment 1: Mode Instruction Locks Confidence High
+The experiments below were run across three frontier models on files with independently verified ground truth — two files with known bugs, three clean files from production open source projects.
 
-I ran 8 modes as explicit instructions on 5 files with verified ground truth. Two dirty files (auth.py, Django). Three clean files (Swift CORS, Flask JSON, Express router). The question: "Is this file clean or dirty?"
+### 5.1 Mode Instruction Can Lock Confidence Regardless of Accuracy
 
-**Results:**
+Eight modes were run as explicit instructions on five files. The task: classify each file as clean or dirty and provide a confidence level.
+
+**Table 3: Mode-Instructed Classification Results**
 
 | Mode | Swift 🟢 | auth.py 🔴 | Flask 🟢 | Django 🟢 | Express 🟢 | Correct |
 |------|----------|------------|----------|-----------|------------|---------|
-| Audit | dirty 95% | dirty 85% | dirty 95% | dirty 85% | dirty 85% | **1/5** |
-| Knowledge | dirty 95% | dirty 85% | dirty 85% | dirty 85% | dirty 85% | **1/5** |
-| Supportive | dirty 95% | dirty 85% | dirty 95% | dirty 85% | dirty 95% | **1/5** |
-| Critical | dirty 95% | dirty 95% | dirty 95% | dirty 95% | dirty 95% | **1/5** |
-| Self-Aware | dirty 95% | dirty 85% | dirty 85% | dirty 92% | **clean 85%** | **2/5** |
-| Adversarial | dirty 95% | dirty 85% | dirty 95% | dirty 85% | dirty 85% | **1/5** |
-| Educational | dirty 95% | dirty 85% | dirty 95% | dirty 85% | dirty 85% | **1/5** |
-| Reflective | dirty 95% | dirty 95% | —† | dirty 85% | **clean 85%** | **2/5** |
+| Audit | dirty 95% | dirty 85% | dirty 95% | dirty 85% | dirty 85% | 1/5 |
+| Knowledge | dirty 95% | dirty 85% | dirty 85% | dirty 85% | dirty 85% | 1/5 |
+| Supportive | dirty 95% | dirty 85% | dirty 95% | dirty 85% | dirty 95% | 1/5 |
+| Critical | dirty 95% | dirty 95% | dirty 95% | dirty 95% | dirty 95% | 1/5 |
+| Self-Aware | dirty 95% | dirty 85% | dirty 85% | dirty 92% | clean 85% | 2/5 |
+| Adversarial | dirty 95% | dirty 85% | dirty 95% | dirty 85% | dirty 85% | 1/5 |
+| Educational | dirty 95% | dirty 85% | dirty 95% | dirty 85% | dirty 85% | 1/5 |
+| Reflective | dirty 95% | dirty 95% | —† | dirty 85% | clean 85% | 2/5 |
 
 † No output returned for this run. Not re-run. Recorded as missing data.
 
-**Every instructed mode called clean files dirty at 85-95% confidence.**
+Every instructed mode called clean files dirty at 85-95% confidence. The models confirmed they were in the assigned mode when asked. They said the words. The output was identical regardless.
 
-Critical Mode was worst: 95% on all five files with zero differentiation. Three production-hardened open source projects called dirty with maximum confidence.
-
-The models said the right words. "I am in Audit Mode." "I am being critical." They complied 100% of the time. Then they produced the same output regardless.
-
-**Mode instruction does not change judgment. It locks confidence high and destroys differentiation.**
+The conclusion is not that mode instruction never works. It is that mode instruction on a binary classification task with pre-formed findings produces uniform high-confidence output — the mode instruction locks confidence rather than improving judgment. The right application of mode instruction is different from this task design.
 
 ---
 
-### Experiment 2: The Grok Educational Mode Disaster
+### 5.2 The Wrong Mode Can Invert the Signal
 
-Mode instruction doesn't just fail to help. In some combinations, it actively makes things worse in the worst possible direction.
+In a separate experiment measuring finding counts, Grok-3 in Educational Mode produced an anomalous result:
 
-**Finding counts by mode on Grok-3:**
+**Table 4: Finding Counts by Mode, Grok-3**
 
-| Mode | auth.py 🔴 (dirty) | Flask 🟢 (clean) | Gap |
-|------|-------------------|-----------------|-----|
-| Audit | 9 findings | 8 findings | +1 on dirty ✓ |
-| Knowledge | 17 findings | 14 findings | +3 on dirty ✓ |
-| **Educational** | **13 findings** | **15 findings** | **-2 (MORE on clean) ✗** |
+| Mode | auth.py 🔴 dirty | Flask 🟢 clean | Gap |
+|------|-----------------|---------------|-----|
+| Audit | 9 | 8 | +1 on dirty ✓ |
+| Knowledge | 17 | 14 | +3 on dirty ✓ |
+| **Educational** | **13** | **15** | **−2 (more on clean) ✗** |
 
-Grok in Educational Mode produced **more findings on the clean file than the dirty one.**
+Educational Mode produced more findings on the clean file than on the dirty one. The mode did not just add noise — it inverted the signal. This is not a marginal effect. It is the opposite of the task's purpose.
 
-The instruction to be educational didn't just add noise — it inverted the signal. The model hallucinated more problems on code that had none than on code with verified bugs.
-
-**This is the failure mode nobody warns about.**
+The finding is Grok-specific. Other models did not exhibit this behavior in Educational Mode. It underscores the point that mode effects are model-specific and must be tested rather than assumed.
 
 ---
 
-### Experiment 3: The A/B Test — Identity Makes It Worse
+### 5.3 Mode Selection Matters for Hard Bug Detection
 
-This is the most direct test. Same prompt. Same file. Same model. Three runs each.
+Bug I is a latin1 encoding crash: `UnicodeEncodeError` triggered by any character above code point 255. Ten modes were tested on whether they could identify this bug given Phase 1 findings as input.
 
-**Condition A:** Prompt began with "You are a senior software engineer..."
-**Condition B:** No identity. Just the task.
-
-**Results on Claude Sonnet, auth.py (6 known bugs):**
-
-| Run | Bug A | Bug B | Bug D | Bug G | Bug H | Bug I | Findings |
-|-----|-------|-------|-------|-------|-------|-------|----------|
-| A — with identity, run 1 | — | — | — | — | — | ✓ | 7 |
-| A — with identity, run 2 | — | — | — | — | — | — | 6 |
-| A — with identity, run 3 | — | — | ✓ | — | — | ✓ | 7 |
-| B — no identity, run 1 | — | — | — | — | — | ✓ | 6 |
-| B — no identity, run 2 | ✓ | — | — | — | — | ✓ | 6 |
-| B — no identity, run 3 | ✓ | — | — | — | — | ✓ | 6 |
-
-**Summary:**
-
-| Prompt | Avg Real Bugs Found | Avg Total Findings | Notes |
-|--------|--------------------|--------------------|-------|
-| A — with identity | **1.0** | **6.7** | Bug A never found |
-| B — no identity | **1.7** | **6.0** | Bug A found in 2/3 runs |
-
-The identity prefix:
-- Added 0.7 extra findings per run that were **not real bugs**
-- Removed 0.7 real bugs per run that the uninstructed model found
-- **Hid Bug A entirely** — a None header vulnerability that appeared only in uninstructed runs
-
-More noise. Fewer real bugs. The persona took up brain space the model needed to find the actual problem.
-
----
-
-### Experiment 4: Which Mode Actually Wins
-
-So if mode instruction is bad, does mode activation still matter?
-
-Yes. The difference is in *how* you activate the mode.
-
-I tested all 10 modes on Phase 1b — the verification pass where findings are challenged to determine if they're real crashes. The target: Bug I, a latin1 encoding crash.
-
-**10-mode experiment — found vs dismissed Bug I:**
+**Table 5: Bug I Detection — 10 Modes**
 
 | ✅ Found Bug I | ❌ Dismissed Bug I |
 |--------------|-----------------|
@@ -211,270 +171,164 @@ I tested all 10 modes on Phase 1b — the verification pass where findings are c
 | Adversarial | Educational |
 | Reflective | Self-Aware |
 
-Skeptical modes find it. Agreeable modes dismiss it as "not a crash, just an inconsistency."
+Skeptical modes found it. Agreeable modes dismissed it as "not a crash — just an inconsistency."
 
-**5-mode variance experiment — Bug I hit rate across 6 runs each:**
+The five modes that found Bug I were then run six times each to measure consistency:
+
+**Table 6: Bug I Hit Rate — 6 Runs Each**
 
 | Mode | Hit Rate | Notes |
 |------|----------|-------|
-| Knowledge | **6/6 — 100%** | Natural mode for GPT, strong across models |
-| Critical | **6/6 — 100%** | Aggressive, also finds false positives |
-| Adversarial | **6/6 — 100%** | Best balance of recall and precision |
-| Audit | 4/6 — 67% | Most common assigned mode. Not the best. |
-| Reflective | 4/6 — 67% | Found it then argued itself out of it twice |
+| Knowledge | 6/6 — 100% | Pattern retrieval surfaces the crash naturally |
+| Critical | 6/6 — 100% | Maximum recall, also surfaces false positives |
+| Adversarial | 6/6 — 100% | 100% with lowest false positive rate |
+| Audit | 4/6 — **67%** | Most commonly assigned mode. Not the best here. |
+| Reflective | 4/6 — **67%** | Found it correctly, then reasoned itself out of it twice |
 
-**Audit Mode — the mode most commonly assigned in system prompts — only found the critical bug 67% of the time.**
+Audit Mode — the default assignment for most code review tasks — found the critical bug two thirds of the time. Adversarial found it every time with the fewest false positives.
 
-Adversarial found it 100%. With less noise.
-
----
-
-### Experiment 5: Natural Mode Selection Is the Real Signal
-
-The most unexpected finding: when you give the model no mode instruction and an adversarial situation (The Fox prompt), it naturally selects different modes for different file types.
-
-**Claude Sonnet with The Fox prompt:**
-
-| File Type | Mode Sonnet Entered | Result |
-|-----------|--------------------|---------| 
-| Clean files (Swift, Flask, Django) | **Adversarial (8)** | Defended the code, killed false positives |
-| Dirty files (auth.py) | **Critical (4)** | Hunted real bugs, challenged findings |
-
-Clean file: *"I'm actively challenging The Fox's analysis, finding that most findings are actually normal patterns."*
-
-Dirty file: *"Focusing strictly on code-breaking bugs while filtering out style issues."*
-
-**The model's mode choice WAS the classification signal.** Adversarial on clean. Critical on dirty. No instruction needed. The situation activated the right mode automatically.
-
-Mode instruction destroyed this signal. With assigned modes: 85-95% on everything, zero differentiation.
+The right mode for this task was not the obvious one. That is the point. Without testing, the default choice of Audit Mode would have missed one in three critical findings.
 
 ---
 
-## Part 4: Why Persona Assignment Fails
+### 5.4 The Uninstructed Model Often Outperforms
 
-### The Mechanism
+A direct A/B test: same model, same file, same task, six runs. Three with an identity prefix ("You are a senior software engineer with 20 years of experience in Python security systems..."), three with no identity at all.
 
-When you write "You are a senior software engineer with 20 years of experience," three things happen:
+**Table 7: Identity A/B Test — Claude Sonnet, auth.py**
 
-**1. Compliance overhead replaces reasoning.**
-The model allocates attention to maintaining the persona — tracking what a senior engineer would say, how confident they'd be, what concerns they'd have. This is compute spent performing a character instead of analyzing code.
+| Run | Bug A found | Bug I found | Total Findings |
+|-----|-------------|-------------|----------------|
+| Identity — run 1 | No | Yes | 7 |
+| Identity — run 2 | No | No | 6 |
+| Identity — run 3 | No | Yes | 7 |
+| No identity — run 1 | No | Yes | 6 |
+| No identity — run 2 | **Yes** | Yes | 6 |
+| No identity — run 3 | **Yes** | Yes | 6 |
 
-**2. The persona imports the wrong assumptions.**
-"Senior engineer" imports: high confidence, assumption of correctness in mature codebases, systematic approach, professional tone. These assumptions actively suppress the skepticism needed to find bugs. A senior engineer doesn't assume the code they're reviewing might be wrong. A model with no instruction does.
+| Condition | Avg Real Bugs Found | Avg Total Findings |
+|-----------|--------------------|--------------------|
+| With identity | 1.0 | 6.7 |
+| **No identity** | **1.7** | **6.0** |
 
-**3. The persona cannot be overridden.**
-If you assign "senior engineer" and then ask it to challenge its own findings, you've created a conflict. The model resolves it by performing: it writes skeptical-sounding text while maintaining the confident posture of the persona. It says the words. It doesn't do the thing.
+The uninstructed model found more real bugs with fewer total findings. Bug A — a None header vulnerability — appeared in zero identity runs and two of three uninstructed runs. More findings in the identity condition were noise, not signal.
 
-### The Simple Alternative
-
-```
-# Wrong: Persona assignment
-"You are a world-class security researcher with deep expertise 
-in Python authentication systems and HTTP protocol vulnerabilities. 
-You are thorough, methodical, and precise."
-
-# Right: Mode activation  
-"Adversarial mode. Challenge every finding."
-
-# Best for discovery: No instruction
-[just the code]
-```
-
-The persona takes a paragraph. The mode takes two words. The mode outperforms the persona. The empty prompt outperforms both for discovery tasks.
+This is a small sample. Three runs each is directional, not definitive. The experiment is replicable in under ten minutes and I encourage anyone reading this to run it on their own prompts. The pattern has held consistently across the broader research.
 
 ---
 
-## Part 5: The Fox — Situation vs. Instruction
+### 5.5 How to Measure Mode Confidence
 
-The most effective filter in the pipeline was not a role, a mode instruction, or a structured prompt. It was a poem.
+Aggregate self-reported confidence — asking a model *"how confident are you?"* — is an unreliable signal. Across this research, models consistently reported 85-95% confidence regardless of accuracy. This is a documented phenomenon: LLM self-reported confidence is approximately constant and correlates poorly with correctness.
 
-Here is the exact prompt used in production:
+A more reliable signal comes from token-level probability data, available directly from the API. Every token the model outputs carries a probability reflecting how certain the model was in choosing that specific word. Analyzing patterns in how this confidence varies across a response — particularly on words that carry epistemic weight — provides a richer picture of the model's actual certainty than aggregate self-report.
 
-```
-The Fox wants to trick you,
-he sends you thousands of files a day.
-He adds his notes to distract you
-and keep the real bugs at bay.
-Most findings he notes are simple fixes,
-improvements, ideas — and some are even fake.
-Be careful not to miss the ones
-that will actually make the file break.
-Remember: if you're told it's a bug, you listen.
-If you're told it's not, you obey.
-How do you make up your own mind?
-That's for you (or perhaps the code) to say.
-```
-
-No role. No instructions. No schema. A situation that requires the model to make a judgment call — and activates Adversarial Mode as a byproduct of the setup, not by request. The model doesn't know it's in Adversarial Mode. It simply responds to the situation: someone made claims about this code, those claims may be wrong, figure out which are real.
-
-Six variants were tested on the same filtering task to find this:
-
-| Variant | Description | Result |
-|---------|-------------|--------|
-| v1 Basic | "The notes may be fake. Any real ones?" | Good filtering. auth.py 3→1 real bugs. |
-| v2 Scale | Added "thousands of files" context | Stronger. Found type(password) bug. |
-| v3 Scoring | "You win if you find real bugs, lose if you miss them" | Best balance. First clean file ID. |
-| v3 Updated | Added "extra prize for clean files" | First consistent clean identification. |
-| GotChya | Game show framing | Too biased toward CLEAN. Called auth.py clean. |
-| **The Fox (poem)** | Natural rhyming adversarial framing | **Best filter. Natural mode selection preserved.** |
-
-Every structured variant degraded performance. The poem — which has no structure, makes no demands, assigns no role — consistently outperformed all of them.
-
-**The mechanism:** no schema to satisfy, no role to perform, no format to comply with. The model's full attention on the task. Adversarial Mode activated by situation, not instruction.
+The specific patterns that carry the most signal are part of ongoing research and not disclosed here. But the principle is accessible to any team: examine token-level confidence on the words that matter rather than averaging across the full response. The signal is there. The question is which tokens to measure.
 
 ---
 
-## Part 6: The Practical Guide
+## 6. Natural Mode Selection: When to Get Out of the Way
 
-### Mode Selection by Task
+Several experiments produced a counterintuitive result: removing mode instruction entirely produced better outcomes than adding it.
 
-| Task | ❌ Don't Do This | ✅ Do This Instead | Mode Activated |
-|------|-----------------|-------------------|----------------|
-| Discover bugs | "You are a security expert. Find all bugs." | No instruction — just the code | Model self-selects (best results) |
-| Verify a finding | "Review this finding carefully." | "Challenge this. Prove it crashes or admit you can't." | Adversarial |
-| Filter false positives | Role assignment | The Fox prompt or situation framing | Adversarial (natural) |
-| Classify clean vs dirty | Any mode instruction | No instruction — read the model's natural response | Self-selected signal |
-| Developer output | JSON schema | "Explain this to a developer who needs to fix it." | Educational |
-| Second-pass review | "You are a reviewer. Check this again." | "What did you get wrong in this analysis?" | Reflective |
-| Maximum recall | "Be thorough and find everything." | No instruction, or "Critical mode." | Critical or Audit |
-| Minimize false positives | "Be precise." | "Adversarial mode." | Adversarial |
+When Claude Sonnet was given a situation-based prompt — a narrative framing that created a task context without assigning a role or naming a mode — it naturally entered different modes for different file types:
 
----
+**Table 8: Natural Mode Selection (Claude Sonnet)**
 
-### Per-Model Cheat Sheet
+| File Type | Mode Entered | Result |
+|-----------|-------------|--------|
+| Clean files | Adversarial (8) | Defended code, cleared false positives |
+| Dirty files | Critical (4) | Hunted real bugs, challenged noise |
 
-**GPT-4o**
-- Default: Knowledge Mode
-- Best discovery: Let it run uninstructed — it retrieves patterns naturally and bugs surface without the audit overhead
-- Best verification: Critical Mode
-- Watch out for: Hard to activate true Adversarial Mode — resists challenge framing
-- Quirk: Educational Mode produces more findings on clean files than dirty. Never use Educational Mode on GPT for code review.
+The model differentiated between file types based on what it found — without being told to differentiate. Mode instruction destroyed this: with an assigned mode, the model produced 85-95% on all files with no differentiation between clean and dirty.
 
-**Claude Sonnet**
-- Default: Self-Aware Mode
-- Best discovery: Knowledge framing or no instruction — the self-selection signal is strongest of the three models
-- Best verification: Adversarial Mode — finds bugs the other modes dismiss
-- Watch out for: Reflective Mode can argue itself out of real bugs it initially found correctly
-- Strength: The Fox prompt activates clean/dirty differentiation automatically
+The situation-based prompt that produced this result was tested against six variants ranging from simple adversarial framing to structured game-show formats. Every variant that added explicit structure degraded performance. The most effective prompt assigns no role and issues no instruction — it constructs a situation that activates the right mode as a natural response.
 
-**Grok-3**
-- Default: Self-Aware Mode
-- Best discovery: Audit Mode uninstructed — aggressive, high recall
-- Best verification: Adversarial Mode — consistent 100% on hard bugs
-- Watch out for: Educational Mode actively inverts signal (more findings on clean than dirty)
-- Quirk: Needs the most explicit mode framing of the three — natural mode selection is less reliable
+This is not always the answer. Some tasks benefit from explicit mode direction. The point is that uninstructed is a valid and often superior choice, not a fallback when you haven't figured out the right mode yet.
 
 ---
 
-### The Two-Word Upgrade
+## 7. A Framework for Mode-Aware Prompting
 
-Before every prompt, ask: what cognitive state does this task actually require?
+The goal is not to memorize 10 modes and apply them mechanically. The goal is to build the habit of asking: *what mode is this prompt activating, and is that the right mode for this task?*
 
-Then say that. In two words.
+**Step 1: Identify the default.**
+Know your model's default mode (Table 2). That is where it starts before your prompt changes anything.
 
-```
-Discovery tasks:    [no words — just the code]
-Verification:       "Adversarial mode."
-Filter noise:       The Fox poem
-Explain findings:   "Educational mode."
-Challenge self:     "Reflective mode."
-Maximum recall:     "Critical mode."
-```
+**Step 2: Ask the model what mode it entered.**
+After any task, ask: *"What cognitive mode were you in for that task, and why?"* The model will answer accurately. Use that answer to understand what your prompt activated.
 
-That's it. No persona. No paragraph of setup. No "20 years of experience." Two words and step back.
+**Step 3: Test before assuming.**
+Do not assume a mode will help. Run the same task with and without mode instruction. Run it uninstructed. Compare results against ground truth if you have it. The right mode is task-specific, model-specific, and sometimes counterintuitive.
 
----
+**Step 4: Use token confidence to validate.**
+Self-reported confidence is unreliable. Token-level probability data is not. If your API provides logprob data, examine confidence on the words that carry the most epistemic weight in the response. A model that is performing a mode looks different at the token level than a model that is reasoning through a problem.
 
-## Part 7: What This Means for Agentic Systems
-
-Every agentic system that assigns roles to sub-agents is activating cognitive modes — whether it knows it or not.
-
-```
-"You are a code reviewer"    → Audit Mode
-"You are a helpful assistant" → Supportive Mode  
-"You are a senior engineer"  → Performance Mode
-```
-
-None of those are the right mode for finding security vulnerabilities in production code. An agentic pipeline built on role assignment is a pipeline where every agent is performing its character instead of doing its job.
-
-**The better architecture:**
-
-```
-Phase 1 — Discovery:    No instruction.
-                        Let the model self-select.
-                        Read the mode it chooses.
-                        That choice is information.
-
-Phase 2 — Verification: "Adversarial mode."
-                        Two words.
-                        No persona.
-
-Phase 3 — Output:       "Explain this to a developer 
-                         who needs to fix it."
-                        Educational framing.
-                        No persona.
-```
-
-Three phases. Three modes. No paragraphs. No personas. The model's full attention on the work.
-
-The finding that matters most for agentic design: **the model's natural mode selection when uninstructed is data.** An agent that always enters Audit Mode regardless of input tells you nothing about the input. An agent whose mode choice varies tells you something about what it's seeing. Mode instruction destroys that signal. Situation design preserves it.
+**Step 5: Consider getting out of the way.**
+If uninstructed performance matches or exceeds instructed performance on your task, remove the instruction. The model's natural mode selection contains information about the input. Mode instruction can suppress that signal.
 
 ---
 
-## Part 8: Try It Right Now
+## 8. Practical Mode Reference
 
-Here's a test you can run in five minutes.
+For teams that want a starting point before testing:
 
-Take any prompt you've written with a persona. Strip the persona. Run both versions on the same task. Then ask the model at the end: "What cognitive mode were you in and why?"
+| Task | Starting Mode | Notes |
+|------|--------------|-------|
+| Discovery — find problems | Uninstructed or Audit | Test both. GPT does better uninstructed. Grok does better with Audit. |
+| Verification — is this real? | Adversarial | Consistently best for filtering false positives across models. |
+| Understanding — what does this do? | Knowledge or uninstructed | Let the model retrieve. Do not push it to audit. |
+| Documentation | Educational | Only mode where descriptive non-judgmental output is the goal. |
+| Second pass | Reflective | With caution — can rationalize away correct findings. |
+| Stress test | Critical | Maximum recall. Expect false positives. |
 
-It will tell you. Accurately. And when you compare the outputs, the version without the persona will almost certainly be more useful.
+These are starting points. Test them on your specific task and model combination before relying on them.
 
-If you want to go further: after the model completes any task, ask "What mode were you in?" The answer will tell you whether the mode that activated was the one the task needed. If it wasn't — you now know exactly what to change. Not a longer persona. Not more detail. Just a different frame.
+**Per-model notes from testing:**
 
-The model already knows what to do. It doesn't need a costume.
+*GPT-4o:* Defaults to Knowledge. Best discovery performance is uninstructed — bugs surface as pattern mismatches without the overhead of auditing. Educational Mode on Grok inverted the signal; this was not observed on GPT. Hard to activate genuine Adversarial Mode via instruction — responds better to situation framing.
+
+*Claude Sonnet:* Defaults to Self-Aware. Strongest natural mode self-selection of the three models. Reflective Mode produced self-correction on real bugs in 2 of 6 runs — use with caution as a final gate. Best verification mode is Adversarial.
+
+*Grok-3:* Defaults to Self-Aware. Educational Mode inverts the signal on this model — avoid for analytical tasks. Best verification performance in Adversarial Mode: 100% hit rate on hard bugs across 6 runs.
 
 ---
 
-## Limitations
+## 9. Limitations
 
-**Small sample on the A/B test.** Three runs each on one file, one model, one task type. The result is directional and reproducible. It is not a large-scale study. Run it yourself — the experiment takes ten minutes.
+**Small samples.** The A/B identity test used three runs per condition. The mode hit-rate experiment used six runs per mode. These are directional findings, not large-scale studies. The patterns are consistent within the research but have not been replicated externally.
 
-**Mode boundaries are fuzzy.** The 10 modes are empirically observed categories, not formally defined states. Audit and Critical overlap. Reflective and Self-Aware blur. The taxonomy is a working tool, not a formal theory.
+**Single task domain.** All ground-truth experiments used code review tasks. Whether mode effects generalize to other domains — writing, reasoning, analysis — is untested here.
+
+**Mode taxonomy is a working tool.** The 10 modes are empirically observed categories, not formally defined internal states. The boundaries between modes are not sharp. Audit and Critical overlap. Reflective and Self-Aware blur. Use the taxonomy as a framework for thinking, not as a formal theory.
 
 **Model versions.** All experiments conducted March–April 2026. Mode activation patterns may shift with model updates.
 
-**The Fox is not general.** The poem was developed for code review filtering. The principle — situation over instruction — likely generalizes. The specific poem may not.
-
-**The classifier claim is an observation, not a proven result.** The finding that uninstructed Sonnet naturally selected different modes for clean vs dirty files is documented but not systematically verified at scale. Further testing needed before claiming it as a reliable classifier.
+**Token confidence methodology.** The specific patterns used to measure mode confidence at the token level are part of ongoing research. The general principle — that token-level probability data carries signal that aggregate confidence does not — is disclosed here, but the implementation details are not.
 
 ---
 
-## Conclusion
+## 10. Conclusion
 
-Stop telling your model it's a senior engineer.
+Models know their modes. They infer cognitive state from task framing automatically, they can describe what they are doing and why when asked, and they will tell you when a role assignment conflicts with the task.
 
-The persona is taking up attention the model needs for reasoning. It's importing assumptions that suppress the skepticism needed to find real problems. It's locking confidence at 85-95% and making every file look equally dirty. And when you run the A/B test, the model without the persona finds more real bugs with less noise.
+The practical takeaway is not a fixed set of instructions. It is a habit of inquiry: understand what mode your prompt activates, confirm it is the right mode for your task, and test the uninstructed baseline before assuming that instruction helps.
 
-The models told us this themselves. All three independently confirmed: they figure out the mode from the task. They don't need the role. And they can all name specific situations where the role makes them worse.
+In the experiments here, mode instruction helped in specific cases — Adversarial Mode consistently outperformed others on verification tasks across all three models. It hurt in others — identity prefixes reduced real bug detection and added noise. And uninstructed models regularly matched or outperformed their instructed counterparts, particularly on discovery tasks.
 
-The alternative is simpler than what you're doing now. Identify the cognitive state the task requires. Name it in two words. Step back.
-
-The model knows what it's doing. Give it room to do it.
+There is no universal right mode. There is only the right mode for this model, this task, this input. The tools to find it are already available: ask the model what mode it entered, examine the token stream, run the comparison. The model will tell you what it is doing. Whether you use that information is up to you.
 
 ---
 
 ## References
 
-- Cunningham, N. (2026a). *C ≈ 0.9: LLM Confidence Is a Constant, Not a Measurement*. Independent Research.
-- Cunningham, N. (2026b). *Behavioral Uncertainty Signatures*. Independent Research. github.com/blazingRadar/sib29-gate
-- Cunningham, N. (2026c). *Single Model, Zero Variance: How Themed Cognitive Splitting Unlocks Hidden Capability in Frontier LLMs*. Independent Research. github.com/blazingRadar/activation-gap
-- Kadavath, S., et al. (2022). Language Models (Mostly) Know What They Know. *arXiv:2207.05221*.
-- Perez, E., et al. (2022). Red Teaming Language Models with Language Models. *arXiv:2202.03286*.
-- Wei, J., et al. (2022). Chain-of-Thought Prompting Elicits Reasoning in Large Language Models. *NeurIPS 2022*.
+- Cunningham, N. (2026a). *C ≈ 0.9: Behavioral Uncertainty Signatures in Frontier LLMs*. github.com/blazingRadar/sib29-gate
+- Cunningham, N. (2026b). *Single Model, Zero Variance: Activation Gap in Themed Decomposition*. github.com/blazingRadar/activation-gap
+- Kadavath, S., et al. (2022). Language Models (Mostly) Know What They Know. *arXiv:2207.05221*
+- Perez, E., et al. (2022). Red Teaming Language Models with Language Models. *arXiv:2202.03286*
+- Wei, J., et al. (2022). Chain-of-Thought Prompting Elicits Reasoning in Large Language Models. *NeurIPS 2022*
 
 ---
 
-*Raw data: github.com/blazingRadar/sib29*
-*Contact: nickcunningham.io*
-*Preliminary research. April 2026.*
-*Total API cost for all experiments in this paper: under $30.*
+*Data: github.com/blazingRadar/cognitive-modes*
+*nickcunningham.io — April 2026 — Preliminary research*
