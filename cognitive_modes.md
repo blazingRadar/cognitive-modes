@@ -1,4 +1,4 @@
-# Stop Telling Your Model It's a Senior Engineer
+# The Model Already Knows
 
 **Nick Cunningham**  
 *Independent Research — March–April 2026*  

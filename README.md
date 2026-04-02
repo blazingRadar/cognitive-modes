@@ -1,4 +1,4 @@
-# Stop Telling Your Model It's a Senior Engineer
+# The Model Already Knows
 
 **Taxonomy and Empirical Evidence of Cognitive Mode Activation in Frontier LLMs**
 
